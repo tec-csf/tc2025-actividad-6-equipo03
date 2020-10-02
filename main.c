@@ -10,29 +10,31 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #define TCP_PORT 8000
 #define NUM_SEMAFOROS 4
 
 int cliente_semaforo; //Accesso global a un semaforo cliente dado
+int interrupcion; //Interrupción actual de consola ([o]Ninguna, [1]Interrupción Rojo, [2]Interrupción Intermitente)
 
 // Manejadores de funciones
 void stopInterruption(int signal);
 void intermitentInterruption(int signal);
+void consoleInterruption(int signal);
 
 // Declaración de funciones
 void printCurrentState(int i);
-void printFullStopInterruption();
-void printIntermitentInterruption();
 
 int main(int argc, const char * argv[])
 {
     //Ignorar señales
-    signal(SIGTSTP, SIG_IGN);
-    //signal(SIGINT, SIG_IGN); //Recomendable dejar CTRL+C utilizable mientras se prueba
+    signal(SIGTSTP, consoleInterruption);
+    signal(SIGINT, consoleInterruption);
 
     struct sockaddr_in direccion;
     char buffer[1000];
@@ -79,7 +81,7 @@ int main(int argc, const char * argv[])
             // Opciones para gestionar señales
             cliente_semaforo = cliente[i]; 
             signal(SIGTSTP, stopInterruption);
-            //signal(SIGINT, intermitentInterruption);
+            signal(SIGINT, intermitentInterruption);
 
             close(servidor);
             if (cliente_semaforo >= 0) {
@@ -122,8 +124,6 @@ int main(int argc, const char * argv[])
 void stopInterruption(int signal) {
     char interruption[] = "STOP"; 
     write(cliente_semaforo, &interruption, sizeof(interruption));
-
-    // Falta detectar cuando se manda por segunda vez (aunque los semáforos ya los hacen)
 }
 
 /*  Manejador de señales para indicar al semaforos un cambio total a INTERMITENTE
@@ -132,8 +132,6 @@ void stopInterruption(int signal) {
 void intermitentInterruption(int signal) {
     char interruption[] = "INTERMITENT"; 
     write(cliente_semaforo, &interruption, sizeof(interruption));
-
-    // Falta detectar cuando se manda por segunda vez (aunque los semáforos ya los hacen)
 }
 
 /*  Metodo para imprimir el estado de los semaforos cuando un semaforo dado cambia su estado a verde
@@ -151,22 +149,28 @@ void printCurrentState(int trafficLight) {
     printf("\n");
 }
 
-/*  Metodo para imprimir el estado de los semaforos cuando ocurren una interrupción de paro total
+/*  Manejador de señales para indicar por consola que una señal de interrupción fue recibida
+    @param signal: id de señal recibida
 */
-void printFullStopInterruption() {
-    printf("Interrupción\n");
+void consoleInterruption(int signal) {
+    char state[15];
+
+    // Manejar los tipos de señales cuando son mandados por primera y segunda ocasión
+    if (signal == 20 && interrupcion != 1) {
+        interrupcion = 1;
+        strcpy(state, "ROJO");
+    } else if (signal == 2 && interrupcion != 2) {
+        interrupcion = 2;
+        strcpy(state, "INTERMITENTE");
+    } else {
+        interrupcion = 0;
+        printf("\nReanudando\n\n");
+        return;
+    }
+
+    printf("\nInterrupción\n");
     printf("------------\n");
     for (int i=0; i<NUM_SEMAFOROS; ++i) {
-        printf("Semaforo %d: ROJO\n", i+1);
+        printf("Semaforo %d: %s\n", i+1, state);
     }
 }
-
-/*  Metodo para imprimir el estado de los semaforos cuando una interruppción de intermitencia
-*/
-void printIntermitentInterruption() {
-    printf("Interrupción\n");
-    printf("------------\n");
-    for (int i=0; i<NUM_SEMAFOROS; ++i) {
-        printf("Semaforo %d: INTERMITENTE\n", i+1);
-    }
-} 

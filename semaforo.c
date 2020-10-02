@@ -16,11 +16,12 @@
 #include <sys/types.h>
 
 #define TCP_PORT 8000
-#define TIEMPO 3
+#define TIEMPO 30
 
 int cliente; //Conexión establecida por socket
 int next_pid; //PID del semaforo siguiente
-int estado;  //Estado actual del semaforo ([0]Rojo, [1]Verde, [2]Interrupción Rojo, [3]Interrupción Intermitente)
+int estado;  //Estado actual del semaforo ([0]Rojo, [1]Verde)
+int interrupcion; //Interrupción actual en el semaforo ([o]Ninguna, [1]Interrupción Rojo, [2]Interrupción Intermitente)
 
 // Manejadores de señales
 void stateChange(int signal);
@@ -32,6 +33,13 @@ void itoa(int n, char s[]);
 
 int main(int argc, const char * argv[])
 {
+    // Crear un conjunto de señales para poder ser bloqueadas/habilitadas
+    sigset_t conjunto, pendientes;
+    sigemptyset(&conjunto);
+    sigaddset(&conjunto, SIGALRM);
+    sigaddset(&conjunto, SIGUSR1);
+
+    // Conexión con consola central
     struct sockaddr_in direccion;
     char buffer[1000];
     
@@ -70,16 +78,19 @@ int main(int argc, const char * argv[])
         while (leidos = read(cliente, &buffer, sizeof(buffer))) {
             if (strcmp(buffer, "START") == 0) {
                 raise(SIGUSR1);
-            } else if (strcmp(buffer, "STOP") == 0 && estado != 2) {
-                estado = 2;
+            } else if (strcmp(buffer, "STOP") == 0 && interrupcion != 2) {
+                interrupcion = 2;
                 // Bloquear señales SIGUSR1 y SIGALRM
-            } else if (strcmp(buffer, "INTERMITENT") == 0 && estado != 3) {
-                estado = 3;
+                sigprocmask(SIG_BLOCK, &conjunto, NULL);
+            } else if (strcmp(buffer, "INTERMITENT") == 0 && interrupcion != 3) {
+                interrupcion = 3;
                 // Bloquear señales SIGUSR1 y SIGALRM
+                sigprocmask(SIG_BLOCK, &conjunto, NULL);
             }
             else {
-                // Ranudar señales si se mandan por segunda vez
-                // Usar señales pendientes (para captar el último alarm)
+                // Ranudar señales si se mandan por segunda vez (se reanudarán las señales pendientes continuando el ciclo)
+                interrupcion = 0;
+                sigprocmask(SIG_UNBLOCK, &conjunto, NULL);
             }
         }
     }
